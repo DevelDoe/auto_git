@@ -1,6 +1,6 @@
-/* To run this app from the command line:
-set WATCH_DIRS=D:\coding\24\vue\moms-journal,D:\coding\24\vue\server-moms
-node D:\coding\24\vue\git-versioning.js */
+/* Start from term 
+set WATCH_DIRS=D:\coding\24\vue\moms-journal,D:\coding\24\vue\moms-journal
+set WATCH_DIRS=D:\coding\24\vue\moms-journal,D:\coding\24\vue\server-moms */
 
 const chokidar = require('chokidar');
 const { exec } = require('child_process');
@@ -10,23 +10,15 @@ const ignore = require('ignore');
 
 // Read directory paths from the WATCH_DIRS environment variable
 const dirPaths = process.env.WATCH_DIRS; // e.g., "D:\coding\24\stocks\ticker,D:\coding\24\stocks\open"
-const WATCH_DIRS = dirPaths.split(',').map(dir => path.resolve(dir)); // Convert to absolute paths
+const WATCH_DIRS = process.env.WATCH_DIRS.split(',').map(dir => path.resolve(dir + '/**/*')); // Include all subdirectories
+
 
 let isProcessing = false; // Flag to prevent multiple git commands
-const verbose = process.argv.includes("-v"); // Check for verbose mode
 
 // Function to log messages
 const log = (message) => {
     console.log(`[${new Date().toISOString()}] ${message}`);
 };
-if(verbose) {
-    const verboseLog = (msg) => {
-        console.log(`[VERBOSE] ${msg}`)
-    }
-} else {
-    // Define a no-op function to avoid errors if verbose mode is not enabled
-    verboseLog = () => {}
-}
 
 // Function to load ignore patterns from the .ignore file
 const loadIgnoreFile = () => {
@@ -42,15 +34,14 @@ const loadIgnoreFile = () => {
         .map(line => line.trim())
         .filter(line => line && !line.startsWith('#')); // Remove comments and empty lines
 
-    log(`Loaded ignore patterns from .ignore`);
-    verboseLog(`Loaded ignore patterns from .ignore: ${ignorePatterns.join(', ')}`);
+    log(`Loaded ignore patterns from .ignore: ${ignorePatterns.join(', ')}`);
     return ignorePatterns;
 };
 
 // Function to commit and push changes
 const commitAndPush = (projectDir) => {
     if (isProcessing) {
-        verboseLog('Commit process is already in progress, skipping this event.');
+        log('Commit process is already in progress, skipping this event.');
         return;
     }
 
@@ -115,36 +106,43 @@ const ignorePatterns = loadIgnoreFile();
 
 // Function to check if a file should be ignored
 const shouldIgnoreFile = (projectDir, filePath) => {
-    const relativePath = path.relative(projectDir, filePath); // Get relative path
+    try {
+        const relativePath = path.relative(projectDir, filePath); // Get relative path
 
-    // If the relative path is empty, return false (indicates the directory itself)
-    if (!relativePath) {
-        verboseLog(`Not checking ignore patterns for directory: ${filePath}`);
-        return false; // Do not ignore directories themselves
-    }
+        // If the relative path is empty or irregular, return false (do not ignore)
+        if (!relativePath || relativePath.startsWith('..')) {
+            log(`Invalid path for ignore check: ${filePath}`);
+            return false;
+        }
 
-    const ig = ignore().add(ignorePatterns); // Use ignore patterns
-    const ignored = ig.ignores(relativePath); // Determine if the file should be ignored
-    if (ignored) {
-        verboseLog(`Ignoring: ${relativePath}`); // Log ignored file
+        const ig = ignore().add(ignorePatterns); // Use ignore patterns
+        const ignored = ig.ignores(relativePath); // Determine if the file should be ignored
+        if (ignored) {
+            log(`Ignoring: ${relativePath}`); // Log ignored file
+        }
+        return ignored; // Return whether to ignore
+    } catch (error) {
+        log(`Error checking if file should be ignored: ${error.message}`);
+        return false; // Default to not ignoring on error
     }
-    return ignored; // Return whether to ignore
 };
+
 
 WATCH_DIRS.forEach((projectDir) => {
     log(`Watching for changes in ${projectDir}...`);
 
     const watcher = chokidar.watch(projectDir, {
         persistent: true,
-        ignored: (filePath) => {
-            return shouldIgnoreFile(projectDir, filePath); // Pass projectDir to shouldIgnoreFile
-        }
+        ignored: /node_modules|\.git|\.ignore/, // Ignore certain directories
+        ignoreInitial: true, // Ignore initial file load events
+        depth: Infinity // Watch all nested directories
     });
 
     watcher.on('all', (event, filePath) => {
+        console.log(`Detected ${event} on ${filePath}`);
         const relativePath = path.relative(projectDir, filePath);
-        verboseLog(`File ${relativePath} has been changed. Event: ${event}`);
-
+        log(`File ${relativePath} has been changed. Event: ${event}`);
+    
         // Only commit and push on relevant events
         if (event === 'add' || event === 'change' || event === 'unlink') {
             commitAndPush(projectDir);
